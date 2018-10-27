@@ -4,6 +4,7 @@ import boto3
 import os
 import json
 import hashlib
+import sys
 
 
 s3 = boto3.resource('s3')
@@ -14,10 +15,22 @@ class SyncDir:
     def __init__(self,
                  bucket_name=None,
                  start_dir=None,
-                 state_path='./state_storage.json'):
+                 state_path='./state_storage.json',
+                 validate=True,
+                 obviate_cache=False,
+                 remove_old=False,
+                 delete=False,
+                 only_delete=False):
+
         self.state_path = state_path
         self.start_dir = DIR
         self.bucket_name = bucket_name
+        self.validate = validate
+
+        self.obviate_cache = obviate_cache
+        self.remove_old = remove_old
+        self.delete_bucket = delete
+        self.only_delete = only_delete
 
         self.directory_state = self.load_previous_state(state_path)
         self.visited = {path: False for path in self.directory_state['paths']}
@@ -112,8 +125,13 @@ class SyncDir:
             if not self.visited[path]:
                 print('Found deleted file :: {}'.format(path))
                 deleted_counter += 1
+                if self.remove_old:
+                    self.delete_file_from_bucket(path)
         if deleted_counter:
-            print('Found {} files deleted locally'.format(deleted_counter))
+            if self.remove_old:
+                print('{} files deleted from backup'.format(deleted_counter))
+            else:
+                print('Found {} files deleted locally'.format(deleted_counter))
             print()
 
     def load_previous_state(self, state_path):
@@ -134,11 +152,23 @@ class SyncDir:
     def main(self):
         self.create_bucket_if_not_exists(self.bucket_name)
 
-        # self.clear_cache()
+        if self.delete_bucket:
+            # print('DELETE')
+            self.clear_bucket()
+            self.clear_cache()
+
+            if self.only_delete:
+                print('Success deleting files from Bucket!')
+                sys.exit(0)
+
+        if self.obviate_cache:
+            # print('OBVIATE')
+            self.clear_cache()
+
         recurse_file_structure(DIR, '/', self.save_file_to_bucket)
 
+        # print('CHECK FOR DELETED')
         self.check_for_deleted()
-        # self.clear_bucket()
 
         print('{} new or modified files transfered'
               .format(self.transfer_counter))
@@ -146,7 +176,10 @@ class SyncDir:
               .format(self.unchanged_files))
 
         print()
-        self.validate_cache()
+
+        if self.validate:
+            # print('VALIDATE')
+            self.validate_cache()
 
         self.save_current_state()
 
@@ -191,10 +224,23 @@ if __name__ == '__main__':
     BUCKET_NAME = 'reee-bucket'
     DIR = '/home/spacekatt/projects/aiohttp_playground/'
     JSON_DUMP = 'state_storage.json'
+    VALIDATE = True
+    OBVIATE_CACHE = False
+    REMOVE_OLD = False
+    DELETE = False
+    ONLY_DELETE = False
 
     try:
-        sync = SyncDir()
+        # sync = SyncDir()
         # sync = SyncDir(BUCKET_NAME, DIR, JSON_DUMP)
+        sync = SyncDir(bucket_name=BUCKET_NAME,
+                       start_dir=DIR,
+                       state_path=JSON_DUMP,
+                       validate=VALIDATE,
+                       obviate_cache=OBVIATE_CACHE,
+                       remove_old=REMOVE_OLD,
+                       delete=DELETE,
+                       only_delete=ONLY_DELETE)
         sync.main()
     except ClientError:
         print('Ooops! There has been a Boto3 ClientError...')
@@ -204,3 +250,6 @@ if __name__ == '__main__':
         print('Ooops! There has been an IOError...')
         print('\n  Are you backing up a valid directory?')
         print('  Is the state being saved to a writeable path?')
+    except Exception:
+        print('Network error! Please retry...')
+        print('If this keeps happening, then please submit a bug report :)')
