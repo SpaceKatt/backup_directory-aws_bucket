@@ -76,16 +76,30 @@ class SyncDir:
     def validate_cache(self):
         print('Checking status of sync...')
         valid = True
+        valid_visited = {path: False for path in self.directory_state['paths']}
+
         for obj in s3.Bucket(self.bucket_name).objects.all():
             meta = s3_client.head_object(Bucket=self.bucket_name, Key=obj.key)
             bucket_md5 = meta['ETag'][1:-1]
             if obj.key not in self.directory_state['paths']:
                 print('Found unknown file in Bucket :: {}'.format(obj.key))
                 valid = False
+                continue
+
             elif bucket_md5 != self.directory_state['paths'][obj.key]:
                 print('File state corrupted in bucket! :: {}'.format(obj.key))
                 print('    ...md5 checksum on bucket differs from local sum')
                 valid = False
+
+            valid_visited[obj.key] = True
+        for path in valid_visited:
+            if not valid_visited[path]:
+                print('!!! File missing from bucket! :: {}'.format(path))
+                print('!!!   To fix this, please rerun program.')
+                self.directory_state['paths'][path] = 'RESET'
+                valid = False
+
+        print()
         if valid:
             print('All files are valid after sync!')
         else:
@@ -120,12 +134,11 @@ class SyncDir:
     def main(self):
         self.create_bucket_if_not_exists(self.bucket_name)
 
+        # self.clear_cache()
         recurse_file_structure(DIR, '/', self.save_file_to_bucket)
 
         self.check_for_deleted()
         # self.clear_bucket()
-
-        self.save_current_state()
 
         print('{} new or modified files transfered'
               .format(self.transfer_counter))
@@ -134,6 +147,8 @@ class SyncDir:
 
         print()
         self.validate_cache()
+
+        self.save_current_state()
 
         self.transfer_counter = 0
         self.unchanged_files = 0
