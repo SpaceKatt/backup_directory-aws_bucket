@@ -56,8 +56,8 @@ class SyncDir:
 
     def clear_cache(self):
         print('Clearing contents of local cache...')
-        for path in self.directory_state['paths']:
-            self.directory_state['paths'][path] = "RESET"
+        for path in list(self.directory_state['paths']):
+            del self.directory_state['paths'][path]
         print('Cache cleared!\n')
 
     def clear_bucket(self):
@@ -169,6 +169,7 @@ class SyncDir:
             self.clear_cache()
 
             if self.only_delete:
+                self.save_current_state()
                 print('Success deleting files from Bucket!')
                 sys.exit(0)
 
