@@ -1,10 +1,12 @@
 from botocore.client import ClientError
 
+import argparse
 import boto3
 import os
 import json
 import hashlib
 import sys
+import traceback
 
 
 s3 = boto3.resource('s3')
@@ -63,6 +65,7 @@ class SyncDir:
 
     def create_bucket_if_not_exists(self, bucket_name):
         if not s3.Bucket(bucket_name) in s3.buckets.all():
+            # TODO: handle bucket creation failure
             s3.Bucket(bucket_name).create(CreateBucketConfiguration={
                 'LocationConstraint': 'us-west-2'
             })
@@ -146,7 +149,10 @@ class SyncDir:
                 print('No state file found!\n')
                 print('Please run "python3 main.py -h" for setup instructions')
                 exit(-1)
-        return load_json_from_file(state_path)
+        state = load_json_from_file(state_path)
+        self.start_dir = state['head_dir']
+        self.bucket_name = state['bucket']
+        return state
 
     def save_current_state(self):
         serialize_json_to_file(self.state_path, self.directory_state)
@@ -167,7 +173,7 @@ class SyncDir:
             self.clear_cache()
 
         # Save any file to the backup that hasn't been uploaded
-        recurse_file_structure(DIR, '/', self.save_file_to_bucket)
+        recurse_file_structure(self.start_dir, '/', self.save_file_to_bucket)
 
         self.check_for_deleted()
 
@@ -221,14 +227,43 @@ def hash_file(file_path):
 
 
 if __name__ == '__main__':
-    BUCKET_NAME = 'reee-bucket'
-    DIR = '/home/spacekatt/projects/aiohttp_playground/'
-    JSON_DUMP = 'state_storage.json'
-    VALIDATE = True
-    OBVIATE_CACHE = False
-    REMOVE_OLD = False
-    DELETE = False
-    ONLY_DELETE = False
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-d', '--directory', default=None,
+                        help='The directory you wish to backup')
+    parser.add_argument('-b', '--bucket', default=None,
+                        help='The name of the bucket we are backing up in')
+    parser.add_argument('-p', '--state_path', default='state_storage.json',
+                        help='Path of local cache of previous state')
+    parser.add_argument('-t', '--trust', action='store_false',
+                        help='Trust state after sync and don\'t verify it')
+    parser.add_argument('-s', '--strict', action="store_true",
+                        help='Remove deleted files that still exist in backup')
+    parser.add_argument('-i', '--ignore_cache', action="store_true",
+                        help='Ignore local state and upload every file found')
+    parser.add_argument('-k', '--kill', action="store_true",
+                        help='Delete files in bucket before uploading')
+    parser.add_argument('-x', '--expunge', action="store_true",
+                        help='Remove all files from backup and don\'t upload')
+
+    args = parser.parse_args()
+
+    BUCKET_NAME = args.bucket
+    DIR = args.directory
+    JSON_DUMP = args.state_path
+    VALIDATE = not args.trust
+    REMOVE_OLD = args.strict
+    OBVIATE_CACHE = args.ignore_cache
+    DELETE = args.kill
+    ONLY_DELETE = args.expunge
+
+    # BUCKET_NAME = 'reee-bucket'
+    # DIR = '/home/spacekatt/projects/aiohttp_playground/'
+    # JSON_DUMP = 'state_storage.json'
+    # VALIDATE = True
+    # OBVIATE_CACHE = False
+    # REMOVE_OLD = False
+    # DELETE = False
+    # ONLY_DELETE = False
 
     try:
         # sync = SyncDir()
@@ -253,3 +288,4 @@ if __name__ == '__main__':
     except Exception:
         print('Network error! Please retry...')
         print('If this keeps happening, then please submit a bug report :)')
+        traceback.print_exec()
