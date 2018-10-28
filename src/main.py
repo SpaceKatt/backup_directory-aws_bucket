@@ -45,6 +45,7 @@ class SyncDir:
             self.bucket_name = self.directory_state['bucket']
 
         if start_dir and self.directory_state['head_dir'] != start_dir:
+            # TODO: handle when directory to backup swtiches
             pass
 
         # To count the number of files sent over network
@@ -132,6 +133,7 @@ class SyncDir:
                 print('{} files deleted from backup'.format(deleted_counter))
             else:
                 print('Found {} files deleted locally'.format(deleted_counter))
+                print('To remove from backup, run again with the "-s" flag')
             print()
 
     def load_previous_state(self, state_path):
@@ -152,8 +154,7 @@ class SyncDir:
     def main(self):
         self.create_bucket_if_not_exists(self.bucket_name)
 
-        if self.delete_bucket:
-            # print('DELETE')
+        if self.delete_bucket or self.only_delete:
             self.clear_bucket()
             self.clear_cache()
 
@@ -161,26 +162,25 @@ class SyncDir:
                 print('Success deleting files from Bucket!')
                 sys.exit(0)
 
-        if self.obviate_cache:
-            # print('OBVIATE')
+        # if delete_bucket, then cache is already cleared
+        if not self.delete_bucket and self.obviate_cache:
             self.clear_cache()
 
+        # Save any file to the backup that hasn't been uploaded
         recurse_file_structure(DIR, '/', self.save_file_to_bucket)
 
-        # print('CHECK FOR DELETED')
         self.check_for_deleted()
 
         print('{} new or modified files transfered'
               .format(self.transfer_counter))
         print('{} unmodified files'
               .format(self.unchanged_files))
-
         print()
 
         if self.validate:
-            # print('VALIDATE')
             self.validate_cache()
 
+        # Save local cache
         self.save_current_state()
 
         self.transfer_counter = 0
