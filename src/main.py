@@ -82,7 +82,7 @@ class SyncDir:
         print('Clearing contents of S3 bucket...')
         for path in list(self.directory_state['paths'].keys()):
             self.delete_file_from_bucket(path)
-        print('Backup deleted\n')
+        print('Bucket cleared\n')
 
     def create_bucket_if_not_exists(self, bucket_name):
         try:
@@ -129,7 +129,7 @@ class SyncDir:
 
     def validate_cache(self):
         print('Checking status of sync...')
-        print('If this takes too long, this step can be skipped with "-t"')
+        print('If this takes too long, this step can be skipped with "-t"\n')
         valid = True
         valid_visited = {path: False for path in self.directory_state['paths']}
 
@@ -144,6 +144,8 @@ class SyncDir:
             elif bucket_md5 != self.directory_state['paths'][obj.key]:
                 print('File state corrupted in bucket! :: {}'.format(obj.key))
                 print('    ...md5 checksum on bucket differs from local sum')
+                self.directory_state['paths'][obj.key] = bucket_md5
+                print('  To fix this error, please rerun program')
                 valid = False
 
             valid_visited[obj.key] = True
