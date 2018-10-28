@@ -1,10 +1,12 @@
 from botocore.client import ClientError
 
+import argparse
 import boto3
 import os
 import json
 import hashlib
 import sys
+import traceback
 
 
 s3 = boto3.resource('s3')
@@ -22,8 +24,7 @@ class SyncDir:
                  delete=False,
                  only_delete=False):
 
-        self.state_path = state_path
-        self.start_dir = DIR
+        self.state_path = os.path.abspath(state_path)
         self.bucket_name = bucket_name
         self.validate = validate
 
@@ -44,25 +45,39 @@ class SyncDir:
         else:
             self.bucket_name = self.directory_state['bucket']
 
+        start_dir = os.path.abspath(start_dir)
         if start_dir and self.directory_state['head_dir'] != start_dir:
-            # TODO: handle when directory to backup swtiches
-            pass
+            print('Uploading a new directory will delete old backup...')
+            answer = query_yes_no('Do you wish to delete old files?')
+            print()
+            if answer:
+                self.delete_bucket = True
+                self.start_dir = os.path.abspath(start_dir)
+                self.directory_state['head_dir'] = self.start_dir
+            else:
+                print('Goodbye, World!')
+                sys.exit(0)
 
         # To count the number of files sent over network
         self.transfer_counter = 0
         self.unchanged_files = 0
 
     def clear_cache(self):
-        for path in self.directory_state['paths']:
-            self.directory_state['paths'][path] = "RESET"
+        print('Clearing contents of local cache...')
+        for path in list(self.directory_state['paths']):
+            del self.directory_state['paths'][path]
+        self.visited = {}
+        print('Cache cleared!\n')
 
     def clear_bucket(self):
+        print('Clearing contents of S3 bucket...')
         for path in list(self.directory_state['paths'].keys()):
             self.delete_file_from_bucket(path)
-        print('Backup deleted')
+        print('Backup deleted\n')
 
     def create_bucket_if_not_exists(self, bucket_name):
         if not s3.Bucket(bucket_name) in s3.buckets.all():
+            # TODO: handle bucket creation failure
             s3.Bucket(bucket_name).create(CreateBucketConfiguration={
                 'LocationConstraint': 'us-west-2'
             })
@@ -75,6 +90,11 @@ class SyncDir:
     def save_file_to_bucket(self, file_name):
         self.visited[file_name] = True
 
+        file_name = os.path.abspath(file_name)
+        if file_name == os.path.abspath(self.state_path):
+            print('Skipping local cache file :: {}'.format(self.state_path))
+            return
+
         file_hash = hash_file(file_name)
         if file_name not in self.directory_state['paths'] \
                 or file_hash != self.directory_state['paths'][file_name]:
@@ -83,12 +103,13 @@ class SyncDir:
             self.transfer_counter += 1
 
             print('Uploading :: {}'.format(file_name))
-            s3_client.upload_file(file_name, BUCKET_NAME, file_name)
+            s3_client.upload_file(file_name, self.bucket_name, file_name)
         else:
             self.unchanged_files += 1
 
     def validate_cache(self):
         print('Checking status of sync...')
+        print('If this takes too long, this step can be skipped with "-t"')
         valid = True
         valid_visited = {path: False for path in self.directory_state['paths']}
 
@@ -124,7 +145,7 @@ class SyncDir:
         deleted_counter = 0
         for path in self.visited:
             if not self.visited[path]:
-                print('Found deleted file :: {}'.format(path))
+                print('Found locally deleted file :: {}'.format(path))
                 deleted_counter += 1
                 if self.remove_old:
                     self.delete_file_from_bucket(path)
@@ -146,7 +167,10 @@ class SyncDir:
                 print('No state file found!\n')
                 print('Please run "python3 main.py -h" for setup instructions')
                 exit(-1)
-        return load_json_from_file(state_path)
+        state = load_json_from_file(state_path)
+        self.start_dir = state['head_dir']
+        self.bucket_name = state['bucket']
+        return state
 
     def save_current_state(self):
         serialize_json_to_file(self.state_path, self.directory_state)
@@ -159,6 +183,7 @@ class SyncDir:
             self.clear_cache()
 
             if self.only_delete:
+                self.save_current_state()
                 print('Success deleting files from Bucket!')
                 sys.exit(0)
 
@@ -167,7 +192,7 @@ class SyncDir:
             self.clear_cache()
 
         # Save any file to the backup that hasn't been uploaded
-        recurse_file_structure(DIR, '/', self.save_file_to_bucket)
+        recurse_file_structure(self.start_dir, '/', self.save_file_to_bucket)
 
         self.check_for_deleted()
 
@@ -175,9 +200,9 @@ class SyncDir:
               .format(self.transfer_counter))
         print('{} unmodified files'
               .format(self.unchanged_files))
-        print()
 
         if self.validate:
+            print()
             self.validate_cache()
 
         # Save local cache
@@ -200,9 +225,14 @@ def load_json_from_file(json_path):
 def recurse_file_structure(directory, dir_path, funct):
     for dir_name, sub_dir_list, file_list in os.walk(directory):
         for found_file in file_list:
-            # Don't load these types of files
-            if '.git' in dir_name or '.env' in dir_name:
+            # Don't upload git configuration and history
+            if '.git' in dir_name:
                 continue
+
+            if '.env' in found_file:
+                print('Skipping sensitive file :: {}'.format(found_file))
+                continue
+
             full_path = os.path.join(dir_name, found_file)
 
             funct(full_path)
@@ -220,19 +250,75 @@ def hash_file(file_path):
     return '{}'.format(md5.hexdigest())
 
 
+def query_yes_no(question, default="yes"):
+    """Ask a yes/no question via raw_input() and return their answer.
+
+    "question" is a string that is presented to the user.
+    "default" is the presumed answer if the user just hits <Enter>.
+        It must be "yes" (the default), "no" or None (meaning
+        an answer is required of the user).
+
+    The "answer" return value is True for "yes" or False for "no".
+
+    Function code from public domain ::
+        http://code.activestate.com/recipes/577058/
+    """
+    valid = {"yes": True, "y": True, "ye": True,
+             "no": False, "n": False}
+    if default is None:
+        prompt = " [y/n] "
+    elif default == "yes":
+        prompt = " [Y/n] "
+    elif default == "no":
+        prompt = " [y/N] "
+    else:
+        raise ValueError("invalid default answer: '%s'" % default)
+
+    while True:
+        sys.stdout.write(question + prompt)
+        choice = input().lower()
+        if default is not None and choice == '':
+            return valid[default]
+        elif choice in valid:
+            return valid[choice]
+        else:
+            sys.stdout.write("Please respond with 'yes' or 'no' "
+                             "(or 'y' or 'n').\n")
+
+
 if __name__ == '__main__':
-    BUCKET_NAME = 'reee-bucket'
-    DIR = '/home/spacekatt/projects/aiohttp_playground/'
-    JSON_DUMP = 'state_storage.json'
-    VALIDATE = True
-    OBVIATE_CACHE = False
-    REMOVE_OLD = False
-    DELETE = False
-    ONLY_DELETE = False
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-d', '--directory', default=None,
+                        help='The directory you wish to backup')
+    parser.add_argument('-b', '--bucket', default=None,
+                        help='The name of the bucket we are backing up in')
+    parser.add_argument('-p', '--state_path', default='state_storage.json',
+                        help='Path of local cache of previous state')
+
+    parser.add_argument('-t', '--trust', action='store_false',
+                        help='Trust state after sync and don\'t verify it')
+    parser.add_argument('-s', '--strict', action="store_true",
+                        help='Remove deleted files that still exist in backup')
+    parser.add_argument('-i', '--ignore_cache', action="store_true",
+                        help='Ignore local state and upload every file found')
+
+    parser.add_argument('-k', '--kill', action="store_true",
+                        help='Delete files in bucket before uploading')
+    parser.add_argument('-x', '--expunge', action="store_true",
+                        help='Remove everything from backup without upload')
+
+    args = parser.parse_args()
+
+    BUCKET_NAME = args.bucket
+    DIR = args.directory
+    JSON_DUMP = args.state_path
+    VALIDATE = args.trust
+    REMOVE_OLD = args.strict
+    OBVIATE_CACHE = args.ignore_cache
+    DELETE = args.kill
+    ONLY_DELETE = args.expunge
 
     try:
-        # sync = SyncDir()
-        # sync = SyncDir(BUCKET_NAME, DIR, JSON_DUMP)
         sync = SyncDir(bucket_name=BUCKET_NAME,
                        start_dir=DIR,
                        state_path=JSON_DUMP,
@@ -253,3 +339,4 @@ if __name__ == '__main__':
     except Exception:
         print('Network error! Please retry...')
         print('If this keeps happening, then please submit a bug report :)')
+        traceback.print_exec()
