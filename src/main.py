@@ -46,7 +46,7 @@ class SyncDir:
             self.directory_state['bucket'] = bucket_name
             print('New bucket detected!')
             print('Uploading files to new bucket.')
-            print('Files in old bucket will still exist.')
+            print('Files in old bucket will still exist.\n')
             self.clear_cache()
         elif not bucket_name:
             self.bucket_name = self.directory_state['bucket']
@@ -85,11 +85,22 @@ class SyncDir:
         print('Backup deleted\n')
 
     def create_bucket_if_not_exists(self, bucket_name):
-        if not s3.Bucket(bucket_name) in s3.buckets.all():
-            # TODO: handle bucket creation failure
-            s3.Bucket(bucket_name).create(CreateBucketConfiguration={
-                'LocationConstraint': 'us-west-2'
-            })
+        try:
+            if not s3.Bucket(bucket_name) in s3.buckets.all():
+                print('Bucket "{}" not found, creating new bucket...'
+                      .format(bucket_name))
+                self.obviate_cache = True
+                print('Clearing cache for new bucket\n')
+                s3.Bucket(bucket_name).create(CreateBucketConfiguration={
+                    'LocationConstraint': 'us-west-2'
+                })
+        except ClientError:
+            print('!!! Error connecting to bucket...')
+            print('!!! Are you using a unique bucket name that you own?')
+            print('!!! Are your AWS credentials configured?')
+            print()
+            print('Please try a new bucket name. For more, please use --help')
+            sys.exit(-1)
 
     def delete_file_from_bucket(self, path):
         print('Deleting file from bucket :: {}'.format(path))
@@ -201,7 +212,7 @@ class SyncDir:
             self.clear_cache()
 
         # Save any file to the backup that hasn't been uploaded
-        print('Syncing files to bucket :: {}'.format(self.bucket_name))
+        print('Syncing files to bucket :: "{}"\n'.format(self.bucket_name))
         recurse_file_structure(self.start_dir, '/', self.save_file_to_bucket)
 
         self.check_for_deleted()
