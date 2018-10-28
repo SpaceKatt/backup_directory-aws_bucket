@@ -27,6 +27,11 @@ class SyncDir:
         self.state_path = os.path.abspath(state_path)
         self.bucket_name = bucket_name
         self.start_dir = start_dir
+        if self.start_dir:
+            if not os.path.exists(start_dir):
+                print('!!! Directory to backup does not exist!')
+                print('    Please try again!')
+                sys.exit(-1)
         self.validate = validate
 
         self.obviate_cache = obviate_cache
@@ -49,7 +54,7 @@ class SyncDir:
         if self.start_dir:
             self.start_dir = os.path.abspath(self.start_dir)
             if self.directory_state['head_dir'] != self.start_dir:
-                print('Uploading a new directory will delete old backup...')
+                print('Uploading new directory will delete bucket contents...')
                 answer = query_yes_no('Do you wish to delete old files?')
                 print()
                 if answer:
@@ -167,8 +172,9 @@ class SyncDir:
                         'paths': {}}
             else:
                 print('!!! No state file found and not enough information !!!')
+                print('!!! Please specify both --directory and --bucket   !!!')
                 print()
-                print('Please run "python3 main.py -h" for setup instructions')
+                print('Please see "python3 main.py --help"')
                 exit(-1)
         state = load_json_from_file(state_path)
         self.start_dir = state['head_dir']
@@ -290,13 +296,21 @@ def query_yes_no(question, default="yes"):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description='''
+        Backs up a directory to an AWS S3 bucket of your choosing. Prior
+        to using this service, please configure your AWS credentials by
+        logging in via the AWS CLI tool, using "aws configure". The first time
+        this service is used, please use the --directory and --bucket arguments
+        to setup which directory to backup and AWS S3 bucket to use. After
+        the first time setup, a local cache will be created to persist this
+        information.
+        ''')
     parser.add_argument('-d', '--directory', default=None,
                         help='The directory you wish to backup')
     parser.add_argument('-b', '--bucket', default=None,
                         help='The name of the bucket we are backing up in')
     parser.add_argument('-p', '--state_path', default='state_storage.json',
-                        help='Path of local cache of previous state')
+                        help='Custom path of local cache of previous state')
 
     parser.add_argument('-t', '--trust', action='store_false',
                         help='Trust state after sync and don\'t verify it')
