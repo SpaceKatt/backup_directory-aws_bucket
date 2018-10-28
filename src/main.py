@@ -26,6 +26,7 @@ class SyncDir:
 
         self.state_path = os.path.abspath(state_path)
         self.bucket_name = bucket_name
+        self.start_dir = start_dir
         self.validate = validate
 
         self.obviate_cache = obviate_cache
@@ -45,18 +46,19 @@ class SyncDir:
         else:
             self.bucket_name = self.directory_state['bucket']
 
-        start_dir = os.path.abspath(start_dir)
-        if start_dir and self.directory_state['head_dir'] != start_dir:
-            print('Uploading a new directory will delete old backup...')
-            answer = query_yes_no('Do you wish to delete old files?')
-            print()
-            if answer:
-                self.delete_bucket = True
-                self.start_dir = os.path.abspath(start_dir)
-                self.directory_state['head_dir'] = self.start_dir
-            else:
-                print('Goodbye, World!')
-                sys.exit(0)
+        if self.start_dir:
+            self.start_dir = os.path.abspath(self.start_dir)
+            if self.directory_state['head_dir'] != self.start_dir:
+                print('Uploading a new directory will delete old backup...')
+                answer = query_yes_no('Do you wish to delete old files?')
+                print()
+                if answer:
+                    self.delete_bucket = True
+                    self.start_dir = os.path.abspath(start_dir)
+                    self.directory_state['head_dir'] = self.start_dir
+                else:
+                    print('Goodbye, World!')
+                    sys.exit(0)
 
         # To count the number of files sent over network
         self.transfer_counter = 0
@@ -164,7 +166,8 @@ class SyncDir:
                         'head_dir': self.start_dir,
                         'paths': {}}
             else:
-                print('No state file found!\n')
+                print('!!! No state file found and not enough information !!!')
+                print()
                 print('Please run "python3 main.py -h" for setup instructions')
                 exit(-1)
         state = load_json_from_file(state_path)
