@@ -48,7 +48,7 @@ class SyncDir:
             print('Uploading files to new bucket.')
             print('Files in old bucket will still exist.')
             self.clear_cache()
-        else:
+        elif not bucket_name:
             self.bucket_name = self.directory_state['bucket']
 
         if self.start_dir:
@@ -64,6 +64,8 @@ class SyncDir:
                 else:
                     print('Goodbye, World!')
                     sys.exit(0)
+        else:
+            self.start_dir = self.directory_state['head_dir']
 
         # To count the number of files sent over network
         self.transfer_counter = 0
@@ -177,8 +179,6 @@ class SyncDir:
                 print('Please see "python3 main.py --help"')
                 exit(-1)
         state = load_json_from_file(state_path)
-        self.start_dir = state['head_dir']
-        self.bucket_name = state['bucket']
         return state
 
     def save_current_state(self):
@@ -201,6 +201,7 @@ class SyncDir:
             self.clear_cache()
 
         # Save any file to the backup that hasn't been uploaded
+        print('Syncing files to bucket :: {}'.format(self.bucket_name))
         recurse_file_structure(self.start_dir, '/', self.save_file_to_bucket)
 
         self.check_for_deleted()
