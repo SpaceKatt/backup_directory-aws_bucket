@@ -55,13 +55,16 @@ class SyncDir:
         self.unchanged_files = 0
 
     def clear_cache(self):
+        print('Clearing contents of local cache...')
         for path in self.directory_state['paths']:
             self.directory_state['paths'][path] = "RESET"
+        print('Cache cleared!\n')
 
     def clear_bucket(self):
+        print('Clearing contents of S3 bucket...')
         for path in list(self.directory_state['paths'].keys()):
             self.delete_file_from_bucket(path)
-        print('Backup deleted')
+        print('Backup deleted\n')
 
     def create_bucket_if_not_exists(self, bucket_name):
         if not s3.Bucket(bucket_name) in s3.buckets.all():
@@ -86,12 +89,13 @@ class SyncDir:
             self.transfer_counter += 1
 
             print('Uploading :: {}'.format(file_name))
-            s3_client.upload_file(file_name, BUCKET_NAME, file_name)
+            s3_client.upload_file(file_name, self.bucket_name, file_name)
         else:
             self.unchanged_files += 1
 
     def validate_cache(self):
         print('Checking status of sync...')
+        print('If this takes too long, this step can be skipped with "-t"')
         valid = True
         valid_visited = {path: False for path in self.directory_state['paths']}
 
@@ -181,9 +185,9 @@ class SyncDir:
               .format(self.transfer_counter))
         print('{} unmodified files'
               .format(self.unchanged_files))
-        print()
 
         if self.validate:
+            print()
             self.validate_cache()
 
         # Save local cache
@@ -234,40 +238,31 @@ if __name__ == '__main__':
                         help='The name of the bucket we are backing up in')
     parser.add_argument('-p', '--state_path', default='state_storage.json',
                         help='Path of local cache of previous state')
+
     parser.add_argument('-t', '--trust', action='store_false',
                         help='Trust state after sync and don\'t verify it')
     parser.add_argument('-s', '--strict', action="store_true",
                         help='Remove deleted files that still exist in backup')
     parser.add_argument('-i', '--ignore_cache', action="store_true",
                         help='Ignore local state and upload every file found')
+
     parser.add_argument('-k', '--kill', action="store_true",
                         help='Delete files in bucket before uploading')
     parser.add_argument('-x', '--expunge', action="store_true",
-                        help='Remove all files from backup and don\'t upload')
+                        help='Remove everything from backup without upload')
 
     args = parser.parse_args()
 
     BUCKET_NAME = args.bucket
     DIR = args.directory
     JSON_DUMP = args.state_path
-    VALIDATE = not args.trust
+    VALIDATE = args.trust
     REMOVE_OLD = args.strict
     OBVIATE_CACHE = args.ignore_cache
     DELETE = args.kill
     ONLY_DELETE = args.expunge
 
-    # BUCKET_NAME = 'reee-bucket'
-    # DIR = '/home/spacekatt/projects/aiohttp_playground/'
-    # JSON_DUMP = 'state_storage.json'
-    # VALIDATE = True
-    # OBVIATE_CACHE = False
-    # REMOVE_OLD = False
-    # DELETE = False
-    # ONLY_DELETE = False
-
     try:
-        # sync = SyncDir()
-        # sync = SyncDir(BUCKET_NAME, DIR, JSON_DUMP)
         sync = SyncDir(bucket_name=BUCKET_NAME,
                        start_dir=DIR,
                        state_path=JSON_DUMP,
