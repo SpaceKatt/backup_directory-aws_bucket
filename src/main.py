@@ -26,6 +26,12 @@ class SyncDir:
 
         self.state_path = os.path.abspath(state_path)
         self.bucket_name = bucket_name
+        self.start_dir = start_dir
+        if self.start_dir:
+            if not os.path.exists(start_dir):
+                print('!!! Directory to backup does not exist!')
+                print('    Please try again!')
+                sys.exit(-1)
         self.validate = validate
 
         self.obviate_cache = obviate_cache
@@ -40,23 +46,26 @@ class SyncDir:
             self.directory_state['bucket'] = bucket_name
             print('New bucket detected!')
             print('Uploading files to new bucket.')
-            print('Files in old bucket will still exist.')
+            print('Files in old bucket will still exist.\n')
             self.clear_cache()
-        else:
+        elif not bucket_name:
             self.bucket_name = self.directory_state['bucket']
 
-        start_dir = os.path.abspath(start_dir)
-        if start_dir and self.directory_state['head_dir'] != start_dir:
-            print('Uploading a new directory will delete old backup...')
-            answer = query_yes_no('Do you wish to delete old files?')
-            print()
-            if answer:
-                self.delete_bucket = True
-                self.start_dir = os.path.abspath(start_dir)
-                self.directory_state['head_dir'] = self.start_dir
-            else:
-                print('Goodbye, World!')
-                sys.exit(0)
+        if self.start_dir:
+            self.start_dir = os.path.abspath(self.start_dir)
+            if self.directory_state['head_dir'] != self.start_dir:
+                print('Uploading new directory will delete bucket contents...')
+                answer = query_yes_no('Do you wish to delete old files?')
+                print()
+                if answer:
+                    self.delete_bucket = True
+                    self.start_dir = os.path.abspath(start_dir)
+                    self.directory_state['head_dir'] = self.start_dir
+                else:
+                    print('Goodbye, World!')
+                    sys.exit(0)
+        else:
+            self.start_dir = self.directory_state['head_dir']
 
         # To count the number of files sent over network
         self.transfer_counter = 0
@@ -76,11 +85,22 @@ class SyncDir:
         print('Backup deleted\n')
 
     def create_bucket_if_not_exists(self, bucket_name):
-        if not s3.Bucket(bucket_name) in s3.buckets.all():
-            # TODO: handle bucket creation failure
-            s3.Bucket(bucket_name).create(CreateBucketConfiguration={
-                'LocationConstraint': 'us-west-2'
-            })
+        try:
+            if not s3.Bucket(bucket_name) in s3.buckets.all():
+                print('Bucket "{}" not found, creating new bucket...'
+                      .format(bucket_name))
+                self.obviate_cache = True
+                print('Clearing cache for new bucket\n')
+                s3.Bucket(bucket_name).create(CreateBucketConfiguration={
+                    'LocationConstraint': 'us-west-2'
+                })
+        except ClientError:
+            print('!!! Error connecting to bucket...')
+            print('!!! Are you using a unique bucket name that you own?')
+            print('!!! Are your AWS credentials configured?')
+            print()
+            print('Please try a new bucket name. For more, please use --help')
+            sys.exit(-1)
 
     def delete_file_from_bucket(self, path):
         print('Deleting file from bucket :: {}'.format(path))
@@ -164,12 +184,12 @@ class SyncDir:
                         'head_dir': self.start_dir,
                         'paths': {}}
             else:
-                print('No state file found!\n')
-                print('Please run "python3 main.py -h" for setup instructions')
+                print('!!! No state file found and not enough information !!!')
+                print('!!! Please specify both --directory and --bucket   !!!')
+                print()
+                print('Please see "python3 main.py --help"')
                 exit(-1)
         state = load_json_from_file(state_path)
-        self.start_dir = state['head_dir']
-        self.bucket_name = state['bucket']
         return state
 
     def save_current_state(self):
@@ -192,6 +212,7 @@ class SyncDir:
             self.clear_cache()
 
         # Save any file to the backup that hasn't been uploaded
+        print('Syncing files to bucket :: "{}"\n'.format(self.bucket_name))
         recurse_file_structure(self.start_dir, '/', self.save_file_to_bucket)
 
         self.check_for_deleted()
@@ -287,13 +308,21 @@ def query_yes_no(question, default="yes"):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description='''
+        Backs up a directory to an AWS S3 bucket of your choosing. Prior
+        to using this service, please configure your AWS credentials by
+        logging in via the AWS CLI tool, using "aws configure". The first time
+        this service is used, please use the --directory and --bucket arguments
+        to setup which directory to backup and AWS S3 bucket to use. After
+        the first time setup, a local cache will be created to persist this
+        information.
+        ''')
     parser.add_argument('-d', '--directory', default=None,
                         help='The directory you wish to backup')
     parser.add_argument('-b', '--bucket', default=None,
                         help='The name of the bucket we are backing up in')
     parser.add_argument('-p', '--state_path', default='state_storage.json',
-                        help='Path of local cache of previous state')
+                        help='Custom path of local cache of previous state')
 
     parser.add_argument('-t', '--trust', action='store_false',
                         help='Trust state after sync and don\'t verify it')
