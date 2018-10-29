@@ -5,8 +5,10 @@ Simple Python utility to backup a directory, and all of its contents
 
 ## Prerequisites
 
-This project was developed and tested with Python 3.5.2 on Linux. The user
-is also expected to have an AWS account, with their client Id and secret handy.
+The user is expected to have an AWS account, along with their client Id
+and secret.
+
+This project was developed and tested with Python 3.5.2 on Linux.
 
 ## Setup
 
